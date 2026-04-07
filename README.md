@@ -1,20 +1,61 @@
-<h1 align=center><code>ord</code></h1>
+<h1 align=center><code>pRune</code> — Shielded Runes</h1>
 
-<div align=center>
-  <a href=https://crates.io/crates/ord>
-    <img src=https://img.shields.io/crates/v/ord.svg alt="crates.io version">
-  </a>
-  <a href=https://github.com/ordinals/ord/actions/workflows/ci.yaml>
-    <img src=https://github.com/ordinals/ord/actions/workflows/ci.yaml/badge.svg alt="build status">
-  </a>
-  <a href=https://github.com/ordinals/ord/releases>
-    <img src=https://img.shields.io/github/downloads/ordinals/ord/total.svg alt=downloads>
-  </a>
-  <a href=https://discord.gg/ordinals>
-    <img src=https://img.shields.io/discord/987504378242007100?logo=discord alt="chat on discord">
-  </a>
-</div>
+<p align=center>Private transfers for Runes on Bitcoin</p>
+
 <br>
+
+> Fork of [ordinals/ord](https://github.com/ordinals/ord) (v0.27.1) extended with the **pRune** protocol.
+
+## What is pRune?
+
+pRune adds a privacy layer to Runes on Bitcoin. Users can **shield** public Runes into private notes, **transfer** them privately (amount, sender, and receiver are hidden), and **unshield** back to public Runes when needed.
+
+- Zero new cryptographic assumptions — uses battle-tested primitives (Groth16, Poseidon, Pedersen)
+- Architecture matches Zcash Sapling / Penumbra
+- All data on Bitcoin (Taproot witness) — Bitcoin is the sole source of truth
+- ~649 bytes per private transfer
+
+## Protocol Flow
+
+```
+Public Rune → Shield (wrap) → Private Note → Private Transfer → Unshield (unwrap) → Public Rune
+```
+
+## Quick Start
+
+```bash
+# Build & test
+docker build -f Dockerfile.prune -t prune-test .
+docker run prune-test
+
+# Or without Docker (requires Rust 1.89+ and C compiler)
+cargo test -p prune -- --nocapture
+```
+
+## Crypto Stack
+
+| Layer | Primitive | Why |
+|---|---|---|
+| ZK Proof | Groth16 (arkworks) | 192-byte proofs, smallest on-chain footprint |
+| Hash | Poseidon on BN254 | ~80x fewer ZK constraints than SHA256 |
+| Commitments | Poseidon-based | Hiding + binding, ZK-friendly |
+| Nullifiers | Poseidon(nk, index, commitment) | Unlinkable double-spend prevention |
+| Encryption | ECDH + ChaCha20-Poly1305 | Note discovery without interaction |
+| Merkle Tree | Incremental Poseidon, depth 32 | ~4 billion note capacity |
+
+## Development Status
+
+- [x] Sprint 1: Crypto core (Poseidon, keys, notes, nullifiers, encryption, Merkle tree)
+- [ ] Sprint 2: Groth16 circuit
+- [ ] Sprint 3: CLI wallet
+- [ ] Sprint 4: Indexer integration
+- [ ] Sprint 5: Browser extension
+- [ ] Sprint 6: End-to-end on Bitcoin signet
+
+---
+
+<details>
+<summary>Original ord README</summary>
 
 `ord` is an index, block explorer, and command-line wallet. It is experimental
 software with no warranty. See [LICENSE](LICENSE) for more details.
@@ -360,3 +401,5 @@ To start a new translation:
 
 6. If everything looks good, commit `XX.po` and open a pull request on GitHub.
    Other changed files should be omitted from the pull request.
+
+</details>
