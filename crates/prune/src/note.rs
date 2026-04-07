@@ -35,7 +35,7 @@
 //! - Two notes with same contents but different blinding → different commitments
 
 use ark_bn254::Fr;
-use ark_ff::PrimeField;
+use ark_ff::{BigInteger, PrimeField};
 
 use crate::poseidon;
 

@@ -17,3 +17,4 @@ pub mod note;
 pub mod nullifier;
 pub mod encryption;
 pub mod tree;
+pub mod circuit;
