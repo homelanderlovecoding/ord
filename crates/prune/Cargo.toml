@@ -1,0 +1,52 @@
+[package]
+name = "prune"
+version = "0.1.0"
+description = "Shielded Rune protocol — private transfers for Runes on Bitcoin"
+
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# ZK proving system
+ark-groth16 = "0.5"
+ark-snark = "0.5"
+ark-relations = "0.5"
+
+# Finite fields and curves (BN254 for Groth16)
+ark-bn254 = "0.5"
+ark-ff = "0.5"
+ark-ec = "0.5"
+
+# Circuit building
+ark-r1cs-std = "0.5"
+ark-crypto-primitives = { version = "0.5", features = ["r1cs"] }
+
+# Serialization
+ark-serialize = "0.5"
+
+# Randomness
+rand = "0.8"
+
+# Encryption
+chacha20poly1305 = "0.10"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+
+# Hashing (for non-circuit code)
+sha2 = "0.10"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Hex encoding
+hex = "0.4"
+
+[dev-dependencies]
+ark-std = "0.5"
