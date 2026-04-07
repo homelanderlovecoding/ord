@@ -61,10 +61,14 @@ Architecture matches Penumbra / Zcash Sapling. Groth16 can be swapped to PLONK (
 ## Sprint Plan
 
 - Sprint 1: Crypto core (poseidon, keys, note, nullifier, encryption, tree) ✅
-- Sprint 2: Groth16 circuit (arkworks) — Merkle inclusion, nullifier, conservation, range check
+- Sprint 2: Groth16 circuit (arkworks) — Merkle inclusion, nullifier, conservation, range check ✅
 - Sprint 3: CLI wallet (shield/transfer/unshield commands)
 - Sprint 4: Indexer integration (hook into ord block scanner)
-- Sprint 5: WASM build + browser extension
+- Sprint 5: Web app — UniSat wallet connect + shield UI (replaces browser extension)
+  - Stack: React + Vite, WASM for proof generation in-browser
+  - UniSat API: window.unisat.requestAccounts(), getBalance(), signPsbt(), pushTx()
+  - Flow: connect wallet → select Rune → enter amount → generate ZK proof (WASM) → build Taproot tx → sign via UniSat → broadcast
+  - The prune crate compiles to WASM via wasm-pack; proof generation runs client-side (no server sees private data)
 - Sprint 6: End-to-end on Bitcoin signet
 
 ## Git Config
