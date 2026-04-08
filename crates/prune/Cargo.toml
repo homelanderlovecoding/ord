@@ -52,6 +52,9 @@ thiserror = "1"
 # Hex encoding
 hex = "0.4"
 
+# Bitcoin primitives (scripts, Taproot, transactions)
+bitcoin.workspace = true
+
 # CLI
 clap = { version = "4.4", features = ["derive"] }
 
