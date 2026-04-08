@@ -60,3 +60,4 @@ dirs = "5"
 
 [dev-dependencies]
 ark-std = "0.5"
+tempfile = "3"
