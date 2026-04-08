@@ -9,6 +9,10 @@ homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[[bin]]
+name = "prune"
+path = "src/bin/prune.rs"
+
 [dependencies]
 # ZK proving system
 ark-groth16 = "0.5"
@@ -47,6 +51,12 @@ thiserror = "1"
 
 # Hex encoding
 hex = "0.4"
+
+# CLI
+clap = { version = "4.4", features = ["derive"] }
+
+# Home directory for default wallet path
+dirs = "5"
 
 [dev-dependencies]
 ark-std = "0.5"
