@@ -17,6 +17,7 @@ pub mod note;
 pub mod nullifier;
 pub mod encryption;
 pub mod tree;
+pub mod broadcast;
 pub mod circuit;
 pub mod transaction;
 pub mod wallet;
