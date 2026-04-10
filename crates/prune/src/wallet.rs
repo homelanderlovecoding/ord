@@ -19,13 +19,14 @@
 use std::path::{Path, PathBuf};
 
 use ark_bn254::Fr;
+use ark_ff::PrimeField;
 use ark_relations::r1cs::ConstraintSynthesizer;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     circuit::{self, SpendCircuit, SpendStatement, SpendWitness},
-    encryption::encrypt_note,
+    encryption::{encrypt_note, decrypt_note, EncryptedNote},
     keys::KeySet,
     note::Note,
     nullifier::compute_nullifier,
@@ -82,6 +83,8 @@ pub struct Wallet {
     pub notes: Vec<StoredNote>,
     pub tree: IncrementalMerkleTree,
     pub spent_nullifiers: Vec<Fr>,
+    /// All tree leaves (commitments) in insertion order — includes non-owned notes.
+    pub tree_leaves: Vec<Fr>,
     path: PathBuf,
 }
 
@@ -111,6 +114,7 @@ impl Wallet {
             notes: Vec::new(),
             tree: IncrementalMerkleTree::new(),
             spent_nullifiers: Vec::new(),
+            tree_leaves: Vec::new(),
             path: path.to_path_buf(),
         };
         wallet.save()?;
@@ -132,9 +136,11 @@ impl Wallet {
 
         // Rebuild the Merkle tree from stored leaves
         let mut tree = IncrementalMerkleTree::new();
+        let mut tree_leaves = Vec::new();
         for leaf_hex in &file.tree_leaves {
             let leaf = fr_from_hex(leaf_hex)?;
             tree.append(leaf);
+            tree_leaves.push(leaf);
         }
 
         let mut notes = Vec::new();
@@ -160,7 +166,7 @@ impl Wallet {
             .map(|h| fr_from_hex(h))
             .collect::<anyhow::Result<Vec<_>>>()?;
 
-        Ok(Self { keys, notes, tree, spent_nullifiers, path: path.to_path_buf() })
+        Ok(Self { keys, notes, tree, spent_nullifiers, tree_leaves, path: path.to_path_buf() })
     }
 
     /// Persist current state to disk.
@@ -184,11 +190,11 @@ impl Wallet {
             })
             .collect();
 
-        // tree_leaves: commitments in insertion order (from owned notes only in Sprint 3)
+        // tree_leaves: ALL commitments in insertion order (fixes save/load bug from Sprint 3)
         let tree_leaves: Vec<String> = self
-            .notes
+            .tree_leaves
             .iter()
-            .map(|sn| fr_to_hex(sn.commitment))
+            .map(|leaf| fr_to_hex(*leaf))
             .collect();
 
         let file = WalletFile {
@@ -216,15 +222,16 @@ impl Wallet {
         let mut rng = rand::thread_rng();
 
         let mut note = Note::new(&mut rng, rune_id, amount, self.keys.public_key);
-        let idx = self.tree.append(note.commitment());
+        let commitment = note.commitment();
+        let idx = self.tree.append(commitment);
+        self.tree_leaves.push(commitment);
         note.set_index(idx);
 
-        let commitment = note.commitment();
         let nullifier = compute_nullifier(self.keys.nullifier_key, note.note_index, commitment);
 
         // Encrypt the note contents for on-chain receiver discovery
         let plaintext = note.to_plaintext();
-        let pk_bytes = fr_to_pk_bytes(self.keys.public_key)?;
+        let pk_bytes = self.keys.x25519_public_bytes();
         let encrypted = encrypt_note(&plaintext, &pk_bytes, &mut rng)?;
         let enc_hex = hex::encode(
             [encrypted.ephemeral_pk.as_slice(), &encrypted.ciphertext].concat(),
@@ -333,6 +340,7 @@ impl Wallet {
 
         // Update wallet state
         let out_idx = self.tree.append(out_commitment);
+        self.tree_leaves.push(out_commitment);
         out_note.set_index(out_idx);
 
         self.notes[input_idx].spent = true;
@@ -444,10 +452,124 @@ impl Wallet {
             proof_hex,
         })
     }
+
+    // ─── Sync ────────────────────────────────────────────────────────────────
+
+    /// Sync the wallet from on-chain indexed data.
+    ///
+    /// - Rebuilds the Merkle tree from ALL commitments (not just owned notes).
+    /// - Attempts to decrypt each encrypted note with the wallet's x25519 viewing key.
+    /// - Marks owned notes as spent if their nullifier appears on-chain.
+    /// - Saves the wallet after sync.
+    pub fn sync_from_indexed_data(
+        &mut self,
+        commitments: &[(u64, Fr)],           // (tree_index, commitment)
+        encrypted_notes: &[(u64, Vec<u8>)],  // (tree_index, ephemeral_pk + ciphertext)
+        nullifiers: &[[u8; 32]],             // all on-chain nullifiers
+    ) -> anyhow::Result<SyncResult> {
+        // 1. Rebuild the tree from ALL commitments
+        let mut tree = IncrementalMerkleTree::new();
+        let mut tree_leaves = Vec::new();
+        for &(_idx, commitment) in commitments {
+            tree.append(commitment);
+            tree_leaves.push(commitment);
+        }
+        self.tree = tree;
+        self.tree_leaves = tree_leaves;
+
+        // 2. Try to decrypt each encrypted note with our x25519 secret key
+        let secret_bytes = self.keys.x25519_secret_bytes();
+        let mut new_notes_found = 0usize;
+
+        for &(tree_index, ref enc_data) in encrypted_notes {
+            if enc_data.len() < 33 {
+                // Too short to contain ephemeral_pk (32) + any ciphertext
+                continue;
+            }
+
+            let mut ephemeral_pk = [0u8; 32];
+            ephemeral_pk.copy_from_slice(&enc_data[..32]);
+            let ciphertext = enc_data[32..].to_vec();
+
+            let encrypted = EncryptedNote {
+                ephemeral_pk,
+                ciphertext,
+            };
+
+            match decrypt_note(&encrypted, &secret_bytes) {
+                Ok(plaintext) => {
+                    // Decryption succeeded — this note is ours
+                    match Note::from_plaintext(&plaintext, self.keys.public_key, tree_index) {
+                        Ok(note) => {
+                            let commitment = note.commitment();
+
+                            // Check if we already track this note (by tree_index)
+                            let already_tracked = self.notes.iter().any(|sn| {
+                                sn.note.note_index == tree_index
+                            });
+
+                            if !already_tracked {
+                                let nullifier = compute_nullifier(
+                                    self.keys.nullifier_key,
+                                    note.note_index,
+                                    commitment,
+                                );
+                                self.notes.push(StoredNote {
+                                    commitment,
+                                    nullifier,
+                                    spent: false,
+                                    note,
+                                });
+                                new_notes_found += 1;
+                            }
+                        }
+                        Err(_) => {
+                            // Plaintext didn't parse — skip
+                            continue;
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Decryption failed — not our note, skip
+                    continue;
+                }
+            }
+        }
+
+        // 3. Mark notes as spent if their nullifier appears on-chain
+        let mut notes_marked_spent = 0usize;
+
+        // Convert on-chain nullifiers to Fr for comparison
+        let on_chain_nullifiers: Vec<Fr> = nullifiers
+            .iter()
+            .map(|bytes| Fr::from_le_bytes_mod_order(bytes))
+            .collect();
+
+        for sn in &mut self.notes {
+            if !sn.spent {
+                if on_chain_nullifiers.contains(&sn.nullifier) {
+                    sn.spent = true;
+                    if !self.spent_nullifiers.contains(&sn.nullifier) {
+                        self.spent_nullifiers.push(sn.nullifier);
+                    }
+                    notes_marked_spent += 1;
+                }
+            }
+        }
+
+        // 4. Save
+        self.save()?;
+
+        Ok(SyncResult {
+            new_notes_found,
+            notes_marked_spent,
+        })
+    }
 }
 
 // ─── Result types ─────────────────────────────────────────────────────────────
 
+#[derive(Debug)]
 pub struct ShieldResult {
     pub note_index: u64,
     pub commitment: Fr,
@@ -455,6 +577,7 @@ pub struct ShieldResult {
     pub tree_root: Fr,
 }
 
+#[derive(Debug)]
 pub struct TransferResult {
     pub anchor: Fr,
     pub nullifier: Fr,
@@ -464,10 +587,17 @@ pub struct TransferResult {
     pub proof_hex: Option<String>,
 }
 
+#[derive(Debug)]
 pub struct UnshieldResult {
     pub rune_id: Fr,
     pub amount: u64,
     pub anchor: Fr,
     pub nullifier: Fr,
     pub proof_hex: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct SyncResult {
+    pub new_notes_found: usize,
+    pub notes_marked_spent: usize,
 }

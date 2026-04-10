@@ -18,6 +18,7 @@ maintainer = "The Ord Maintainers"
 
 [workspace]
 members = [".", "crates/*"]
+exclude = ["crates/prune-wasm"]
 
 [workspace.package]
 authors = ["The Ord Maintainers"]
@@ -75,6 +76,7 @@ minicbor = { version = "2.1.1", features = ["alloc", "derive", "half"] }
 miniscript = "13.0.0"
 mp4 = "0.14.0"
 ordinals = { version = "0.0.15", path = "crates/ordinals" }
+prune = { path = "crates/prune" }
 redb = "3.1.0"
 ref-cast = "1.0.23"
 regex.workspace = true

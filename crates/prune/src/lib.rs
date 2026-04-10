@@ -11,6 +11,8 @@
 //! - `encryption`: ECDH + ChaCha20-Poly1305 note encryption for receiver discovery
 //! - `tree`: Incremental Poseidon Merkle tree (note accumulator)
 
+pub use ark_bn254::Fr;
+
 pub mod poseidon;
 pub mod keys;
 pub mod note;
@@ -21,3 +23,4 @@ pub mod broadcast;
 pub mod circuit;
 pub mod transaction;
 pub mod wallet;
+pub mod indexer;

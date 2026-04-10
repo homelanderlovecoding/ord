@@ -1,5 +1,9 @@
 use {
-  self::{inscription_updater::InscriptionUpdater, rune_updater::RuneUpdater},
+  self::{
+    inscription_updater::InscriptionUpdater,
+    prune_updater::PruneUpdater,
+    rune_updater::RuneUpdater,
+  },
   super::{fetcher::Fetcher, *},
   futures::future::try_join_all,
   tokio::sync::{
@@ -9,6 +13,7 @@ use {
 };
 
 mod inscription_updater;
+mod prune_updater;
 mod rune_updater;
 
 pub(crate) struct BlockData {
@@ -386,6 +391,31 @@ impl Updater<'_> {
       }
 
       rune_updater.update()?;
+    }
+
+    // ─── pRune indexing ──────────────────────────────────────────────────
+    {
+      let mut prune_nullifier_set = wtx.open_table(PRUNE_NULLIFIER_SET)?;
+      let mut prune_commitment_to_index = wtx.open_table(PRUNE_COMMITMENT_TO_INDEX)?;
+      let mut prune_encrypted_notes = wtx.open_table(PRUNE_ENCRYPTED_NOTES)?;
+      let mut prune_tree_root_at_height = wtx.open_table(PRUNE_TREE_ROOT_AT_HEIGHT)?;
+      let mut prune_tree_next_index = wtx.open_table(PRUNE_TREE_NEXT_INDEX)?;
+
+      let mut prune_updater = PruneUpdater::new(
+        self.index.event_sender.as_ref(),
+        self.height,
+        &mut prune_nullifier_set,
+        &mut prune_commitment_to_index,
+        &mut prune_encrypted_notes,
+        &mut prune_tree_root_at_height,
+        &mut prune_tree_next_index,
+      )?;
+
+      for (tx, txid) in block.txdata.iter() {
+        prune_updater.index_prune_ops(tx, *txid)?;
+      }
+
+      prune_updater.finalize()?;
     }
 
     height_to_block_header.insert(&self.height, &block.header.store())?;

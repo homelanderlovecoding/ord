@@ -41,4 +41,23 @@ pub enum Event {
     rune_id: RuneId,
     txid: Txid,
   },
+  PruneShielded {
+    block_height: u32,
+    txid: Txid,
+    commitment: [u8; 32],
+    tree_index: u64,
+  },
+  PruneTransferred {
+    block_height: u32,
+    txid: Txid,
+    nullifier: [u8; 32],
+    out_commitment: [u8; 32],
+    tree_index: u64,
+  },
+  PruneUnshielded {
+    block_height: u32,
+    txid: Txid,
+    nullifier: [u8; 32],
+    amount: u64,
+  },
 }

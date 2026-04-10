@@ -53,7 +53,7 @@ mod utxo_entry;
 #[cfg(test)]
 pub(crate) mod testing;
 
-const SCHEMA_VERSION: u64 = 34;
+const SCHEMA_VERSION: u64 = 35;
 
 define_multimap_table! { LATEST_CHILD_SEQUENCE_NUMBER_TO_COLLECTION_SEQUENCE_NUMBER, u32, u32 }
 define_multimap_table! { SAT_TO_SEQUENCE_NUMBER, u64, u32 }
@@ -79,6 +79,11 @@ define_table! { STATISTIC_TO_COUNT, u64, u64 }
 define_table! { TRANSACTION_ID_TO_RUNE, &TxidValue, u128 }
 define_table! { TRANSACTION_ID_TO_TRANSACTION, &TxidValue, &[u8] }
 define_table! { WRITE_TRANSACTION_STARTING_BLOCK_COUNT_TO_TIMESTAMP, u32, u128 }
+define_table! { PRUNE_NULLIFIER_SET, &[u8; 32], () }
+define_table! { PRUNE_COMMITMENT_TO_INDEX, u64, &[u8; 32] }
+define_table! { PRUNE_ENCRYPTED_NOTES, u64, &[u8] }
+define_table! { PRUNE_TREE_ROOT_AT_HEIGHT, u32, &[u8; 32] }
+define_table! { PRUNE_TREE_NEXT_INDEX, u64, u64 }
 
 #[derive(Copy, Clone)]
 pub(crate) enum Statistic {
@@ -99,6 +104,7 @@ pub(crate) enum Statistic {
   SatRanges = 14,
   UnboundInscriptions = 16,
   LastSavepointHeight = 17,
+  IndexPrune = 18,
 }
 
 impl Statistic {
