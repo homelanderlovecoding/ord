@@ -40,6 +40,7 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Nonce,
 };
 use sha2::{Sha256, Digest};
+use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret as X25519StaticSecret};
 
 /// Encrypted note as it appears on-chain.
 #[derive(Clone, Debug)]
@@ -85,39 +86,29 @@ fn derive_nonce(shared_secret: &[u8], ephemeral_pk: &[u8]) -> [u8; 12] {
 
 /// Encrypt a note's plaintext for a receiver.
 ///
-/// For MVP, we simulate ECDH using simple key derivation from the
-/// receiver's public key and a random ephemeral secret.
-/// In production, this would use proper x25519 ECDH.
+/// Uses x25519 ECDH to derive a shared secret between an ephemeral keypair
+/// and the receiver's public key.
 ///
 /// Returns: EncryptedNote containing ephemeral_pk + ciphertext
 pub fn encrypt_note(
     plaintext: &[u8],
     receiver_pk_bytes: &[u8; 32],
-    rng: &mut impl rand::Rng,
+    rng: &mut (impl rand::CryptoRng + rand::RngCore),
 ) -> anyhow::Result<EncryptedNote> {
-    // Generate ephemeral keypair (random 32 bytes)
-    let mut ephemeral_secret = [0u8; 32];
-    rng.fill_bytes(&mut ephemeral_secret);
+    // Generate ephemeral x25519 keypair
+    let ephemeral_secret = X25519StaticSecret::random_from_rng(rng);
+    let ephemeral_pk = X25519PublicKey::from(&ephemeral_secret);
 
-    // Ephemeral public key: hash(ephemeral_secret) — simplified for MVP
-    let mut hasher = Sha256::new();
-    hasher.update(b"pRune_ephemeral_pk");
-    hasher.update(&ephemeral_secret);
-    let epk_hash = hasher.finalize();
-    let mut ephemeral_pk = [0u8; 32];
-    ephemeral_pk.copy_from_slice(&epk_hash);
+    // Receiver's x25519 public key
+    let receiver_x25519_pk = X25519PublicKey::from(*receiver_pk_bytes);
 
-    // ECDH shared secret: hash(ephemeral_secret || receiver_pk)
-    // In production: x25519(ephemeral_secret, receiver_pk)
-    let mut hasher = Sha256::new();
-    hasher.update(b"pRune_ecdh");
-    hasher.update(&ephemeral_secret);
-    hasher.update(receiver_pk_bytes);
-    let shared_secret = hasher.finalize();
+    // x25519 ECDH shared secret
+    let shared_secret = ephemeral_secret.diffie_hellman(&receiver_x25519_pk);
 
     // Derive symmetric key and nonce
-    let key = derive_symmetric_key(&shared_secret);
-    let nonce_bytes = derive_nonce(&shared_secret, &ephemeral_pk);
+    let ephemeral_pk_bytes: [u8; 32] = ephemeral_pk.to_bytes();
+    let key = derive_symmetric_key(shared_secret.as_bytes());
+    let nonce_bytes = derive_nonce(shared_secret.as_bytes(), &ephemeral_pk_bytes);
 
     // Encrypt with ChaCha20-Poly1305
     let cipher = ChaCha20Poly1305::new_from_slice(&key)
@@ -128,38 +119,33 @@ pub fn encrypt_note(
         .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
 
     Ok(EncryptedNote {
-        ephemeral_pk,
+        ephemeral_pk: ephemeral_pk_bytes,
         ciphertext,
     })
 }
 
-/// Decrypt a note using the receiver's secret key.
+/// Decrypt a note using the receiver's x25519 secret key.
 ///
-/// The receiver computes the same shared secret using their key + the ephemeral pk,
-/// then derives the same symmetric key to decrypt.
+/// The receiver computes the same shared secret via x25519 ECDH using their
+/// secret key and the ephemeral public key, then derives the same symmetric
+/// key to decrypt.
 ///
 /// Returns: plaintext bytes, or error if decryption fails (wrong key).
 pub fn decrypt_note(
     encrypted: &EncryptedNote,
     receiver_secret_bytes: &[u8; 32],
 ) -> anyhow::Result<Vec<u8>> {
-    // Recompute ECDH shared secret: hash(receiver_secret || ephemeral_pk)
-    // For this to work, receiver_secret must correspond to receiver_pk used during encryption
-    //
-    // In our simplified ECDH:
-    //   encrypt: shared = hash(ephemeral_secret || receiver_pk)
-    //   decrypt: shared = hash(receiver_secret || ephemeral_pk)
-    //
-    // These DON'T match (simplified MVP). For proper ECDH they would.
-    // So we use a trick: the "receiver_secret_bytes" passed here is actually
-    // the same shared_secret that was derived during encryption.
-    //
-    // TODO: Replace with proper x25519 ECDH for production
+    // Reconstruct receiver's x25519 secret key
+    let receiver_secret = X25519StaticSecret::from(*receiver_secret_bytes);
 
-    let shared_secret_input = receiver_secret_bytes;
+    // Reconstruct ephemeral public key
+    let ephemeral_pk = X25519PublicKey::from(encrypted.ephemeral_pk);
 
-    let key = derive_symmetric_key(shared_secret_input);
-    let nonce_bytes = derive_nonce(shared_secret_input, &encrypted.ephemeral_pk);
+    // x25519 ECDH shared secret (same as encrypt side due to commutativity)
+    let shared_secret = receiver_secret.diffie_hellman(&ephemeral_pk);
+
+    let key = derive_symmetric_key(shared_secret.as_bytes());
+    let nonce_bytes = derive_nonce(shared_secret.as_bytes(), &encrypted.ephemeral_pk);
 
     let cipher = ChaCha20Poly1305::new_from_slice(&key)
         .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
@@ -179,24 +165,29 @@ mod tests {
         let mut rng = rand::thread_rng();
         let plaintext = b"hello pRune world! this is a test note";
 
-        let receiver_pk = [42u8; 32];
+        // Generate x25519 keypair for receiver
+        let receiver_secret = X25519StaticSecret::random_from_rng(&mut rng);
+        let receiver_pk = X25519PublicKey::from(&receiver_secret);
+        let receiver_pk_bytes: [u8; 32] = receiver_pk.to_bytes();
+        let receiver_secret_bytes: [u8; 32] = receiver_secret.to_bytes();
 
-        let encrypted = encrypt_note(plaintext, &receiver_pk, &mut rng).unwrap();
+        let encrypted = encrypt_note(plaintext, &receiver_pk_bytes, &mut rng).unwrap();
 
-        // For MVP test: we need the shared secret to decrypt
-        // This simulates proper ECDH where both sides derive the same secret
-        // In production, x25519 handles this automatically
-
-        // For now, verify the ciphertext is different from plaintext
+        // Ciphertext should differ from plaintext and include auth tag
         assert_ne!(&encrypted.ciphertext[..plaintext.len()], &plaintext[..]);
-        assert_eq!(encrypted.ciphertext.len(), plaintext.len() + 16); // +16 for auth tag
+        assert_eq!(encrypted.ciphertext.len(), plaintext.len() + 16);
+
+        // Decrypt with receiver's secret key
+        let decrypted = decrypt_note(&encrypted, &receiver_secret_bytes).unwrap();
+        assert_eq!(decrypted, plaintext);
     }
 
     #[test]
     fn test_different_ephemeral_keys_different_ciphertext() {
         let mut rng = rand::thread_rng();
         let plaintext = b"same plaintext";
-        let receiver_pk = [42u8; 32];
+        let receiver_secret = X25519StaticSecret::random_from_rng(&mut rng);
+        let receiver_pk = X25519PublicKey::from(&receiver_secret).to_bytes();
 
         let enc1 = encrypt_note(plaintext, &receiver_pk, &mut rng).unwrap();
         let enc2 = encrypt_note(plaintext, &receiver_pk, &mut rng).unwrap();
@@ -218,12 +209,14 @@ mod tests {
     fn test_wrong_key_fails_decryption() {
         let mut rng = rand::thread_rng();
         let plaintext = b"secret data";
-        let receiver_pk = [42u8; 32];
+        let receiver_secret = X25519StaticSecret::random_from_rng(&mut rng);
+        let receiver_pk = X25519PublicKey::from(&receiver_secret).to_bytes();
 
         let encrypted = encrypt_note(plaintext, &receiver_pk, &mut rng).unwrap();
 
         // Try to decrypt with wrong key
-        let wrong_key = [99u8; 32];
+        let wrong_secret = X25519StaticSecret::random_from_rng(&mut rng);
+        let wrong_key = wrong_secret.to_bytes();
         let result = decrypt_note(&encrypted, &wrong_key);
         assert!(result.is_err(), "Wrong key should fail decryption");
     }

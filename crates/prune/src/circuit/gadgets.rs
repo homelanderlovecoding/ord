@@ -102,10 +102,10 @@ pub(super) fn poseidon_permutation_var(
 /// hash2 in R1CS: Poseidon(a, b) → output.
 ///
 /// Used for Merkle tree internal node hashing.
-/// State layout: [0, a, b] — matches native `poseidon::hash2`.
+/// State layout: [2, a, b] — matches native `poseidon::hash2` (arity domain tag).
 pub fn hash2_var(a: &FpVar<Fr>, b: &FpVar<Fr>) -> Result<FpVar<Fr>, SynthesisError> {
     let params = PoseidonParams::new(3);
-    let mut state = vec![FpVar::zero(), a.clone(), b.clone()];
+    let mut state = vec![FpVar::constant(Fr::from(2u64)), a.clone(), b.clone()];
     poseidon_permutation_var(&mut state, &params)?;
     Ok(state.remove(0))
 }
@@ -113,7 +113,7 @@ pub fn hash2_var(a: &FpVar<Fr>, b: &FpVar<Fr>) -> Result<FpVar<Fr>, SynthesisErr
 /// hash3 in R1CS: Poseidon(a, b, c) → output.
 ///
 /// Used for nullifier = Poseidon(nullifier_key, note_index, commitment).
-/// Pads with a zero input to fill the t=5 state.
+/// Pads with a zero input to fill the t=5 state. Arity domain tag = 3.
 pub fn hash3_var(
     a: &FpVar<Fr>,
     b: &FpVar<Fr>,
@@ -121,7 +121,7 @@ pub fn hash3_var(
 ) -> Result<FpVar<Fr>, SynthesisError> {
     let params = PoseidonParams::new(5);
     let mut state = vec![
-        FpVar::zero(),
+        FpVar::constant(Fr::from(3u64)),
         a.clone(),
         b.clone(),
         c.clone(),
@@ -133,7 +133,7 @@ pub fn hash3_var(
 
 /// hash4 in R1CS: Poseidon(a, b, c, d) → output.
 ///
-/// Used for note commitment = Poseidon(rune_id, amount, blinding, owner_pk).
+/// Used for note commitment = Poseidon(rune_id, amount, blinding, owner_pk). Arity domain tag = 4.
 pub fn hash4_var(
     a: &FpVar<Fr>,
     b: &FpVar<Fr>,
@@ -142,7 +142,7 @@ pub fn hash4_var(
 ) -> Result<FpVar<Fr>, SynthesisError> {
     let params = PoseidonParams::new(5);
     let mut state = vec![
-        FpVar::zero(),
+        FpVar::constant(Fr::from(4u64)),
         a.clone(),
         b.clone(),
         c.clone(),

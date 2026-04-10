@@ -35,7 +35,7 @@
 //! - Two notes with same contents but different blinding → different commitments
 
 use ark_bn254::Fr;
-use ark_ff::{BigInteger, PrimeField};
+use ark_ff::{BigInteger, PrimeField, UniformRand};
 
 use crate::poseidon;
 
@@ -68,13 +68,13 @@ pub struct Note {
 
 impl Note {
     /// Create a new note with a random blinding factor.
-    pub fn new<R: rand::Rng>(
+    pub fn new<R: rand::Rng + ?Sized>(
         rng: &mut R,
         rune_id: Fr,
         amount: u64,
         owner_pk: Fr,
     ) -> Self {
-        let blinding = Fr::from(rng.next_u64());
+        let blinding = Fr::rand(rng);
         Self {
             rune_id,
             amount,

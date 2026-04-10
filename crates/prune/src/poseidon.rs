@@ -193,8 +193,8 @@ pub fn poseidon_permutation(state: &mut Vec<Fr>, params: &PoseidonParams) {
 /// Apply permutation, output = state[0]
 pub fn hash2(a: Fr, b: Fr) -> Fr {
     let params = PoseidonParams::new(3);
-    // Sponge: capacity element = 0, then two input elements
-    let mut state = vec![Fr::from(0u64), a, b];
+    // Sponge: capacity element encodes arity for domain separation
+    let mut state = vec![Fr::from(2u64), a, b];
     poseidon_permutation(&mut state, &params);
     state[0]
 }
@@ -207,7 +207,8 @@ pub fn hash2(a: Fr, b: Fr) -> Fr {
 /// Apply permutation, output = state[0]
 pub fn hash4(a: Fr, b: Fr, c: Fr, d: Fr) -> Fr {
     let params = PoseidonParams::new(5);
-    let mut state = vec![Fr::from(0u64), a, b, c, d];
+    // Sponge: capacity element encodes arity for domain separation
+    let mut state = vec![Fr::from(4u64), a, b, c, d];
     poseidon_permutation(&mut state, &params);
     state[0]
 }
@@ -217,8 +218,9 @@ pub fn hash4(a: Fr, b: Fr, c: Fr, d: Fr) -> Fr {
 /// Used for: Nullifier = Poseidon(nullifier_key, note_index, commitment)
 pub fn hash3(a: Fr, b: Fr, c: Fr) -> Fr {
     let params = PoseidonParams::new(5);
-    // Pad with zero for the 4th input
-    let mut state = vec![Fr::from(0u64), a, b, c, Fr::from(0u64)];
+    // Sponge: capacity element encodes arity for domain separation
+    // Pad with zero for the 4th input; arity tag prevents hash3(a,b,c) == hash4(a,b,c,0)
+    let mut state = vec![Fr::from(3u64), a, b, c, Fr::from(0u64)];
     poseidon_permutation(&mut state, &params);
     state[0]
 }

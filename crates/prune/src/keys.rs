@@ -31,7 +31,9 @@
 //! - Verify: vk and nk are different for same sk
 
 use ark_bn254::Fr;
-use ark_ff::PrimeField;
+use ark_ff::{BigInteger, PrimeField, UniformRand};
+use sha2::{Digest, Sha256};
+use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret as X25519StaticSecret};
 
 use crate::poseidon;
 
@@ -42,6 +44,7 @@ use crate::poseidon;
 /// make each derivation unique by mixing in a distinct constant.
 const DOMAIN_VIEWING_KEY: u64 = 0x7652756e655f766b; // "pRune_vk" as bytes
 const DOMAIN_NULLIFIER_KEY: u64 = 0x7052756e655f6e6b; // "pRune_nk" as bytes
+const DOMAIN_PUBLIC_KEY: u64 = 0x7052756e655f706b; // "pRune_pk" as bytes
 
 /// Full key set derived from a spending key.
 #[derive(Clone, Debug)]
@@ -78,10 +81,10 @@ impl KeySet {
         // Different domain tag ensures nk ≠ vk
         let nk = poseidon::hash2(sk, Fr::from(DOMAIN_NULLIFIER_KEY));
 
-        // public_key = Poseidon(sk, sk)
-        // Simple derivation — in production, this would be sk * G (elliptic curve point)
+        // public_key = Poseidon(sk, DOMAIN_PUBLIC_KEY)
+        // Domain-separated derivation — in production, this would be sk * G (elliptic curve point)
         // For MVP, we keep everything in the scalar field for simplicity
-        let pk = poseidon::hash2(sk, sk);
+        let pk = poseidon::hash2(sk, Fr::from(DOMAIN_PUBLIC_KEY));
 
         Self {
             spending_key: sk,
@@ -92,11 +95,31 @@ impl KeySet {
     }
 
     /// Generate a new random key set.
-    pub fn generate<R: rand::Rng>(rng: &mut R) -> Self {
-        let sk = Fr::from(rng.next_u64());
-        // In production: use Fr::rand(rng) for full 256-bit randomness
-        // For MVP, u64 is fine for testing
+    pub fn generate<R: rand::Rng + ?Sized>(rng: &mut R) -> Self {
+        let sk = Fr::rand(rng);
         Self::from_spending_key(sk)
+    }
+
+    /// Derive x25519 secret key bytes from the spending key.
+    ///
+    /// Uses SHA256("pRune_x25519_sk" || spending_key_bytes) to deterministically
+    /// derive 32 bytes suitable for use as an x25519 static secret.
+    pub fn x25519_secret_bytes(&self) -> [u8; 32] {
+        let sk_bytes = self.spending_key.into_bigint().to_bytes_le();
+        let mut hasher = Sha256::new();
+        hasher.update(b"pRune_x25519_sk");
+        hasher.update(&sk_bytes);
+        let result = hasher.finalize();
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&result);
+        out
+    }
+
+    /// Derive x25519 public key bytes from the deterministic x25519 secret.
+    pub fn x25519_public_bytes(&self) -> [u8; 32] {
+        let secret = X25519StaticSecret::from(self.x25519_secret_bytes());
+        let public = X25519PublicKey::from(&secret);
+        public.to_bytes()
     }
 }
 
